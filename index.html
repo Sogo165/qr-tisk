@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#176b5d">
+  <meta name="description" content="Vytvořte QR kódy na míru a stáhněte je jako PDF ve formátu A4. Vše funguje lokálně ve vašem prohlížeči." data-i18n-content="meta.description">
+  <title data-i18n="meta.title">QR tisk — QR kódy na A4 PDF</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="i18n.js"></script>
+  <script defer src="vendor/qrcode.min.js"></script>
+  <script defer src="vendor/jspdf.umd.min.js"></script>
+  <script defer src="utils.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 16v4h14v-4"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></symbol>
+    <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="icon-ruler" viewBox="0 0 24 24"><path d="m4 15 11-11 5 5L9 20H4v-5Z"/><path d="m12 7 2 2m-5 1 2 2m-5 1 2 2"/></symbol>
+    <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="icon-install" viewBox="0 0 24 24"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4Z"/><path d="M12 9v5m0 3v.01"/></symbol>
+    <symbol id="icon-arrow-up" viewBox="0 0 24 24"><path d="M12 20V5m0 0-5 5m5-5 5 5"/></symbol>
+  </svg>
+
+  <header class="app-header">
+    <a class="brand" href="./" title="Zpět na začátek" data-i18n-title="brand.homeTitle">
+      <span class="brand-mark" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </span>
+      <span class="brand-name" data-i18n="brand.name">QR tisk</span>
+      <span class="brand-tag">A4 PDF</span>
+    </a>
+    <div class="header-actions">
+      <span class="privacy-note"><svg aria-hidden="true"><use href="#icon-lock"/></svg><span data-i18n="header.privacy">Data zůstávají v prohlížeči</span></span>
+      <div class="lang-switch" role="group" aria-label="Jazyk rozhraní" data-i18n-aria-label="lang.group">
+        <button class="lang-button" type="button" data-lang="cs" title="Čeština" aria-pressed="true">CS</button>
+        <button class="lang-button" type="button" data-lang="en" title="English" aria-pressed="false">EN</button>
+      </div>
+      <button id="install-button" class="button button-quiet hidden" type="button">
+        <svg aria-hidden="true"><use href="#icon-install"/></svg><span data-i18n="header.install">Nainstalovat</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow" data-i18n="intro.eyebrow">Jednoduše z textu na papír</p>
+        <h1 id="page-title" data-i18n="intro.title">QR kódy přesně na míru.</h1>
+        <p class="intro-copy" data-i18n="intro.copy">Vložte odkazy, zvolte rozměry v milimetrech a stáhněte si PDF připravené k tisku na A4.</p>
+      </div>
+      <div class="local-save-note"><span class="save-dot" aria-hidden="true"></span><span data-i18n="intro.saveNote">Rozepsané kódy se ukládají v tomto zařízení</span></div>
+    </section>
+
+    <div class="workspace">
+      <div class="editor-column">
+        <section class="panel input-panel" aria-labelledby="input-title">
+          <div class="section-heading">
+            <span class="step-number" aria-hidden="true">1</span>
+            <div>
+              <h2 id="input-title" data-i18n="input.title">Vložte odkazy nebo texty</h2>
+              <p data-i18n="input.desc">Každý řádek vytvoří samostatný QR kód.</p>
+            </div>
+          </div>
+          <label class="sr-only" for="bulk-input" data-i18n="input.ariaLabel">Odkazy nebo texty pro QR kódy</label>
+          <textarea id="bulk-input" class="bulk-input" rows="5" placeholder="https://priklad.cz/prvni-odkaz,&#10;https://priklad.cz/druhy-odkaz" data-i18n-placeholder="input.placeholder"></textarea>
+          <div class="input-options">
+            <label class="checkbox-label">
+              <input id="split-commas" type="checkbox" checked>
+              <span data-i18n="input.splitCommas">Oddělovat také čárkami</span>
+            </label>
+            <label class="compact-field" for="default-size">
+              <span data-i18n="input.newQr">Nový QR</span>
+              <span class="unit-input"><input id="default-size" type="number" min="10" max="200" step="0.1" value="30" inputmode="decimal"><span>mm</span></span>
+            </label>
+          </div>
+          <button id="add-button" class="button button-primary button-full" type="button">
+            <svg aria-hidden="true"><use href="#icon-plus"/></svg><span data-i18n="input.add">Přidat QR kódy</span>
+          </button>
+          <p id="input-hint" class="field-hint" data-i18n="input.hint">Čárky uvnitř již vytvořeného textu zůstanou zachovány.</p>
+        </section>
+
+        <section class="items-section" aria-labelledby="items-title">
+          <div class="items-heading">
+            <div class="title-with-count">
+              <span class="step-number" aria-hidden="true">2</span>
+              <h2 id="items-title" data-i18n="items.title">Upravte QR kódy</h2>
+              <span id="item-count" class="count-badge">0</span>
+            </div>
+            <button id="clear-button" class="text-button hidden" type="button" data-i18n="items.clear">Vymazat vše</button>
+          </div>
+          <div id="empty-state" class="empty-state">
+            <div class="empty-qr" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <h3 data-i18n="items.emptyTitle">Zatím tu není žádný QR kód</h3>
+            <p data-i18n="items.emptyText">Vložte výše jeden nebo více textů a stiskněte „Přidat QR kódy“.</p>
+          </div>
+          <div id="items-list" class="items-list"></div>
+        </section>
+      </div>
+
+      <aside class="preview-column" aria-labelledby="preview-title">
+        <section class="panel preview-panel">
+          <div class="preview-heading">
+            <div>
+              <p class="eyebrow" data-i18n="preview.eyebrow">Výstup pro tisk</p>
+              <h2 id="preview-title" data-i18n="preview.title">Náhled A4</h2>
+            </div>
+            <span id="page-badge" class="page-badge">0 stránek</span>
+          </div>
+
+          <div class="page-navigation">
+            <button id="previous-page" class="icon-button" type="button" aria-label="Předchozí stránka" data-i18n-aria-label="preview.previous" disabled><svg aria-hidden="true"><use href="#icon-chevron-left"/></svg></button>
+            <span id="page-indicator">Stránka 0 / 0</span>
+            <button id="next-page" class="icon-button" type="button" aria-label="Další stránka" data-i18n-aria-label="preview.next" disabled><svg aria-hidden="true"><use href="#icon-chevron-right"/></svg></button>
+          </div>
+
+          <div id="paper-container" class="paper-container">
+            <div id="paper" class="paper" aria-label="Náhled stránky A4" data-i18n-aria-label="preview.paperAria">
+              <div id="paper-empty" class="paper-empty">
+                <span class="paper-empty-icon" aria-hidden="true">A4</span>
+                <span data-i18n-html="preview.paperEmpty">Zde se objeví náhled<br>vašich QR kódů</span>
+              </div>
+              <div id="placements"></div>
+            </div>
+          </div>
+          <p id="layout-error" class="layout-error hidden" role="alert"></p>
+
+          <fieldset class="print-settings">
+            <legend data-i18n="preview.settings">Nastavení stránky</legend>
+            <div class="settings-grid">
+              <label class="setting-field" for="page-margin">
+                <span data-i18n="preview.margin">Okraj</span>
+                <span class="unit-input"><input id="page-margin" type="number" min="0" max="50" step="0.1" value="10" inputmode="decimal"><span>mm</span></span>
+              </label>
+              <label class="setting-field" for="item-gap">
+                <span data-i18n="preview.gaps">Mezery</span>
+                <span class="unit-input"><input id="item-gap" type="number" min="0" max="50" step="0.1" value="8" inputmode="decimal"><span>mm</span></span>
+              </label>
+              <label class="toggle-field">
+                <input id="show-labels" type="checkbox" checked>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span data-i18n="preview.labels">Popisky</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="export-area">
+            <div id="export-summary" class="export-summary" data-i18n="preview.addFirst">Přidejte alespoň jeden QR kód</div>
+            <button id="download-button" class="button button-primary button-full download-button" type="button" disabled>
+              <svg aria-hidden="true"><use href="#icon-download"/></svg><span data-i18n="preview.download">Stáhnout A4 PDF</span>
+            </button>
+            <p class="print-note"><svg aria-hidden="true"><use href="#icon-ruler"/></svg><span data-i18n-html="preview.printNote">Při tisku PDF zvolte <strong>„Skutečná velikost“ / 100 %</strong>, aby rozměry seděly.</span></p>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <span data-i18n="brand.name">QR tisk</span>
+    <span data-i18n="footer.tagline">Žádné účty. Žádné odesílání textů na server.</span>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <template id="qr-card-template">
+    <article class="qr-card">
+      <div class="qr-card-header">
+        <span class="qr-card-title"></span>
+        <span class="qr-status"></span>
+      </div>
+      <div class="qr-card-body">
+        <div class="item-qr-preview">
+          <img class="item-qr-image" alt="" width="112" height="112">
+          <div class="item-qr-placeholder">QR</div>
+        </div>
+        <div class="item-fields">
+          <label class="item-text-label"><span data-i18n="card.textLabel">Text nebo URL</span><textarea class="item-text" rows="2" required></textarea></label>
+          <div class="item-secondary-fields">
+            <label class="item-size-label"><span data-i18n="card.size">Velikost</span><span class="unit-input"><input class="item-size" type="number" min="10" max="200" step="0.1" inputmode="decimal"><span>mm</span></span></label>
+            <label class="item-label-label"><span data-i18n="card.label">Popisek (nepovinný)</span><input class="item-label" type="text" maxlength="100" placeholder="Např. Sdílená složka" data-i18n-placeholder="card.labelPlaceholder"></label>
+          </div>
+        </div>
+      </div>
+      <p class="item-error hidden" role="alert"></p>
+      <div class="qr-card-actions">
+        <button class="text-button apply-size-button" type="button"><svg aria-hidden="true"><use href="#icon-ruler"/></svg><span data-i18n="card.applyAll">Rozměr pro všechny</span></button>
+        <span class="card-action-spacer"></span>
+        <button class="icon-button duplicate-button" type="button" aria-label="Duplikovat QR kód" title="Duplikovat" data-i18n-aria-label="card.duplicateAriaGeneric" data-i18n-title="card.duplicateTitle"><svg aria-hidden="true"><use href="#icon-copy"/></svg></button>
+        <button class="icon-button delete-button" type="button" aria-label="Odstranit QR kód" title="Odstranit" data-i18n-aria-label="card.deleteAriaGeneric" data-i18n-title="card.deleteTitle"><svg aria-hidden="true"><use href="#icon-trash"/></svg></button>
+      </div>
+    </article>
+  </template>
+</body>
+</html>
