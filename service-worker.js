@@ -1,4 +1,4 @@
-const CACHE_NAME = "qr-tisk-v1.2.1";
+const CACHE_NAME = "qr-tisk-v1.2.2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -17,7 +17,12 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
+  const requests = APP_SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(requests))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (event) => {
