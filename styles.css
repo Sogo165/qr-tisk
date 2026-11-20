@@ -259,6 +259,8 @@ h2 { margin: 0; font-size: 17px; line-height: 1.45; font-weight: 700; letter-spa
 .icon-button:hover:not(:disabled) { background: var(--surface-soft); color: var(--accent); border-color: var(--line-strong); }
 .icon-button:disabled { opacity: 0.35; cursor: not-allowed; }
 .icon-button svg { width: 17px; height: 17px; }
+.github-link { text-decoration: none; }
+.github-link svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
 
 .items-section { margin-top: 29px; }
 .items-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 13px; padding: 0 2px; }
@@ -440,6 +442,8 @@ h2 { margin: 0; font-size: 17px; line-height: 1.45; font-weight: 700; letter-spa
   .header-actions .button { min-height: 34px; padding: 7px 10px; font-size: 10px; }
   .lang-switch { padding: 2px; }
   .lang-button { min-width: 28px; height: 24px; padding: 0 5px; font-size: 9px; }
+  .github-link { width: 30px; height: 30px; }
+  .github-link svg { width: 16px; height: 16px; }
   .app-shell { padding: 25px 14px 38px; }
   .intro { margin-bottom: 23px; }
   h1 { font-size: 31px; letter-spacing: -1.2px; }
@@ -465,13 +469,18 @@ h2 { margin: 0; font-size: 17px; line-height: 1.45; font-weight: 700; letter-spa
   .placement-label { font-size: clamp(3px, 1.2vw, 5px); }
 }
 
+@media (max-width: 400px) {
+  #install-button { width: 34px; padding: 0; }
+  #install-button span { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
 
 @media print {
   body { background: #fff; }
-  .app-header, .intro, .editor-column, .preview-heading, .page-navigation, .print-settings, .export-area, .app-footer, .toast { display: none !important; }
+  .app-header, .intro, .editor-column, .preview-heading, .page-navigation, .print-settings, .qr-style, .export-area, .app-footer, .toast { display: none !important; }
   .app-shell, .workspace, .preview-column, .preview-panel, .paper-container { display: block; padding: 0; margin: 0; max-width: none; border: 0; box-shadow: none; background: #fff; }
   .paper { width: 210mm; height: 297mm; box-shadow: none; }
 }
