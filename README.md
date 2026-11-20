@@ -6,8 +6,11 @@ Jednoduchá webová aplikace pro tvorbu QR kódů s přesnými rozměry a jejich
 
 - vložit více odkazů nebo textů najednou, oddělených řádky nebo čárkami,
 - nastavit výchozí velikost nového QR kódu (přednastaveno 30 × 30 mm),
+- vytvořit QR kód z textu, URL, Wi-Fi, kontaktu (vCard), e-mailu, SMS, telefonu, polohy nebo kalendářní události – s validací povinných polí,
 - upravit text, velikost a volitelný popisek zvlášť u každého QR kódu,
 - zkopírovat velikost jedné položky na všechny ostatní,
+- vrátit poslední změny zpět a znovu je opakovat (Ctrl+Z / Ctrl+Y),
+- přizpůsobit vzhled všech QR kódů – barvu kódu a pozadí, tvar modulů (čtverce, zaoblené, tečky) a logo uprostřed,
 - automaticky rozmístit různě velké QR kódy do řádků na A4,
 - nastavit okraj stránky a mezery mezi kódy,
 - procházet náhledem všech vytvořených stránek,
@@ -58,6 +61,12 @@ Aplikaci stačí nahrát na libovolný statický hosting s HTTPS (například Gi
 2. Z menu prohlížeče zvolte **Přidat na plochu** nebo **Nainstalovat aplikaci**.
 3. Po prvním načtení jsou potřebné soubory uloženy i pro použití offline.
 
+## Vzhled a logo
+
+V části **Vzhled QR kódů** lze změnit barvu kódu a pozadí, tvar modulů a přidat logo doprostřed. Logo automaticky zapne nejvyšší korekci chyb (H), přesto doporučujeme před tiskem otestovat skenování na cílovém zařízení.
+
+Historie změn (zpět/znovu) je dostupná po dobu otevřené stránky. Rozpracované QR kódy a nastavení vzhledu se ukládají lokálně, historie kroků se neukládá.
+
 ## Tisk ve správné velikosti
 
 PDF má skutečnou velikost A4, tedy **210 × 297 mm**. V dialogu tiskárny zvolte:
@@ -72,7 +81,9 @@ Tichá zóna kolem QR kódu je součástí zadaného čtvercového rozměru.
 - `index.html` — rozhraní aplikace,
 - `styles.css` — responzivní vzhled,
 - `i18n.js` — české a anglické texty a přepínač jazyka,
-- `app.js` — QR kódy, náhled, lokální ukládání a PDF export,
+- `content-types.js` — typy obsahu, jejich pole, kódování a validace,
+- `qr-render.js` — vykreslení QR kódu s barvami, tvary a logem,
+- `app.js` — QR kódy, náhled, historie změn, lokální ukládání a PDF export,
 - `utils.js` — dělení vstupu a výpočet rozložení na A4,
 - `vendor/` — lokálně uložené knihovny node-qrcode a jsPDF,
 - `manifest.webmanifest`, `service-worker.js` — instalace a offline režim.
@@ -82,5 +93,7 @@ Licence zapouzdřených knihoven jsou uvedeny v `THIRD_PARTY_NOTICES.md` a slož
 ## English
 
 QR Print is a static, browser-only QR code generator with exact millimetre sizes and A4 PDF export. Nothing you type is sent to a server. Use the **CS / EN** switch in the header to change the interface language; the choice is remembered and can also be forced with `?lang=cs` or `?lang=en`.
+
+It also supports undo/redo, structured content types (Wi-Fi, vCard, email, SMS, phone, location, calendar event), custom code/background colours, module shapes and a centre logo.
 
 To deploy, upload the repository contents to any static host (GitHub Pages works without a build step). Enable HTTPS to keep offline mode and PWA installation available.

@@ -2,10 +2,20 @@
   "use strict";
 
   const utils = window.QRAppUtils;
+  const content = window.QRContent;
   const i18n = window.QRAppI18n;
+  const renderer = window.QRAppQrRender;
   const t = (key, ...args) => i18n.t(key, ...args);
   const STORAGE_KEY = "qr-tisk-state-v1";
   const QR_IMAGE_SIZE = 512;
+  const HISTORY_LIMIT = 60;
+  const EDIT_BURST_MS = 700;
+  const DEFAULT_STYLE = Object.freeze({
+    foreground: "#111714",
+    background: "#ffffff",
+    shape: "square",
+    logo: "",
+  });
 
   const elements = {
     bulkInput: document.getElementById("bulk-input"),
@@ -31,6 +41,17 @@
     downloadButton: document.getElementById("download-button"),
     installButton: document.getElementById("install-button"),
     toast: document.getElementById("toast"),
+    undoButton: document.getElementById("undo-button"),
+    redoButton: document.getElementById("redo-button"),
+    foreground: document.getElementById("qr-foreground"),
+    background: document.getElementById("qr-background"),
+    shape: document.getElementById("qr-shape"),
+    logoInput: document.getElementById("logo-input"),
+    logoUpload: document.getElementById("logo-upload-button"),
+    logoRemove: document.getElementById("logo-remove-button"),
+    logoPreview: document.getElementById("logo-preview"),
+    contrastWarning: document.getElementById("contrast-warning"),
+    styleReset: document.getElementById("style-reset"),
   };
 
   let state = loadState();
@@ -39,10 +60,41 @@
   let toastTimer = null;
   let installPrompt = null;
   let exporting = false;
+  const history = { past: [], future: [] };
+  let editBurstTimer = null;
+  let styleTimer = null;
 
   function createId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
     return `qr-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function normalizeStyle(saved) {
+    const source = saved && typeof saved === "object" ? saved : {};
+    return {
+      foreground: renderer.normalizeColor(source.foreground, DEFAULT_STYLE.foreground),
+      background: renderer.normalizeColor(source.background, DEFAULT_STYLE.background),
+      shape: renderer.SHAPES.includes(source.shape) ? source.shape : DEFAULT_STYLE.shape,
+      logo: typeof source.logo === "string" && /^data:image\//.test(source.logo) ? source.logo : "",
+    };
+  }
+
+  function reviveItem(saved) {
+    const type = content.isType(saved && saved.type) ? saved.type : "text";
+    const data = content.normalize(type, saved && saved.data, saved && saved.text);
+    return {
+      id: saved && typeof saved.id === "string" ? saved.id : createId(),
+      type,
+      data,
+      text: content.encode(type, data),
+      size: utils.clamp(saved && saved.size, 10, 200, 30),
+      label: saved && typeof saved.label === "string" ? saved.label.slice(0, 100) : "",
+      image: "",
+      error: "",
+      fieldError: "",
+      generating: false,
+      generation: 0,
+    };
   }
 
   function loadState() {
@@ -53,6 +105,7 @@
       gap: 8,
       showLabels: true,
       bulkText: "",
+      style: { ...DEFAULT_STYLE },
       items: [],
     };
 
@@ -67,17 +120,9 @@
         gap: utils.clamp(saved.gap, 0, 50, fallback.gap),
         showLabels: saved.showLabels !== false,
         bulkText: typeof saved.bulkText === "string" ? saved.bulkText : "",
+        style: normalizeStyle(saved.style),
         items: Array.isArray(saved.items)
-          ? saved.items.slice(0, 500).filter((item) => item && typeof item.text === "string").map((item) => ({
-              id: typeof item.id === "string" ? item.id : createId(),
-              text: item.text,
-              size: utils.clamp(item.size, 10, 200, fallback.defaultSize),
-              label: typeof item.label === "string" ? item.label.slice(0, 100) : "",
-              image: "",
-              error: "",
-              generating: false,
-              generation: 0,
-            }))
+          ? saved.items.slice(0, 500).filter((item) => item && typeof item === "object" && (typeof item.text === "string" || (item.data && typeof item.data === "object"))).map(reviveItem)
           : [],
       };
     } catch (error) {
@@ -95,8 +140,11 @@
         gap: state.gap,
         showLabels: state.showLabels,
         bulkText: state.bulkText,
+        style: state.style,
         items: state.items.map((item) => ({
           id: item.id,
+          type: item.type,
+          data: item.data,
           text: item.text,
           size: item.size,
           label: item.label,
@@ -115,6 +163,89 @@
     toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), 3600);
   }
 
+  /* ---------- History ---------- */
+
+  function snapshotItems() {
+    return state.items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      data: { ...item.data },
+      text: item.text,
+      size: item.size,
+      label: item.label,
+    }));
+  }
+
+  function updateHistoryButtons() {
+    elements.undoButton.disabled = history.past.length === 0;
+    elements.redoButton.disabled = history.future.length === 0;
+  }
+
+  function pushHistory() {
+    if (editBurstTimer) {
+      window.clearTimeout(editBurstTimer);
+      editBurstTimer = null;
+    }
+
+    const snapshot = snapshotItems();
+    const last = history.past[history.past.length - 1];
+    if (last && JSON.stringify(last) === JSON.stringify(snapshot)) {
+      history.future = [];
+      updateHistoryButtons();
+      return;
+    }
+
+    history.past.push(snapshot);
+    if (history.past.length > HISTORY_LIMIT) history.past.shift();
+    history.future = [];
+    updateHistoryButtons();
+  }
+
+  function noteEdit(force) {
+    if (editBurstTimer) {
+      window.clearTimeout(editBurstTimer);
+      if (force) pushHistory();
+    } else {
+      pushHistory();
+    }
+    editBurstTimer = window.setTimeout(() => {
+      editBurstTimer = null;
+    }, EDIT_BURST_MS);
+  }
+
+  function restoreItems(snapshot) {
+    state.items.forEach((item) => {
+      window.clearTimeout(item.editTimer);
+      item.generation += 1;
+    });
+    state.items = snapshot.map(reviveItem);
+    window.clearTimeout(editBurstTimer);
+    editBurstTimer = null;
+
+    renderItems();
+    updatePreview();
+    saveState();
+    Promise.allSettled(state.items.map((item) => generateQr(item)));
+  }
+
+  function undo() {
+    if (!history.past.length) return;
+    history.future.push(snapshotItems());
+    if (history.future.length > HISTORY_LIMIT) history.future.shift();
+    restoreItems(history.past.pop());
+    updateHistoryButtons();
+  }
+
+  function redo() {
+    if (!history.future.length) return;
+    history.past.push(snapshotItems());
+    if (history.past.length > HISTORY_LIMIT) history.past.shift();
+    restoreItems(history.future.pop());
+    updateHistoryButtons();
+  }
+
+  /* ---------- Item state ---------- */
+
   function findCard(item) {
     return Array.from(elements.itemsList.children).find((card) => card.dataset.id === item.id) || null;
   }
@@ -129,11 +260,18 @@
 
     if (item.image) image.src = item.image;
     else image.removeAttribute("src");
-    image.alt = item.image ? t("card.alt", item.text) : "";
+    image.alt = item.image ? t("card.alt", item.label || (item.text || "").split("\n")[0]) : "";
 
-    card.classList.toggle("has-error", Boolean(item.error));
+    card.classList.toggle("has-error", Boolean(item.error) || Boolean(item.fieldError));
     error.classList.toggle("hidden", !item.error);
     error.textContent = item.error ? t(`error.${item.error}`) : "";
+
+    card.querySelectorAll("[data-field]").forEach((control) => {
+      const invalid = Boolean(item.fieldError) && control.getAttribute("data-field") === item.fieldError;
+      control.classList.toggle("invalid", invalid);
+      if (invalid) control.setAttribute("aria-invalid", "true");
+      else control.removeAttribute("aria-invalid");
+    });
   }
 
   function updateCardState(item) {
@@ -152,25 +290,38 @@
     });
   }
 
-  function invalidateQr(item) {
-    item.generation += 1;
-    item.image = "";
+  function validateItem(item) {
+    const problem = content.validate(item.type, item.data);
+    item.fieldError = problem ? problem.field || "" : "";
+    if (problem) {
+      item.error = problem.key;
+      item.image = "";
+      item.generating = false;
+      return false;
+    }
     item.error = "";
-    item.generating = true;
-    window.clearTimeout(item.editTimer);
-    updateCardState(item);
-    updatePreview();
+    item.text = content.encode(item.type, item.data);
+    return true;
   }
 
   async function generateQr(item) {
     window.clearTimeout(item.editTimer);
     const generation = ++item.generation;
-    const text = item.text.trim();
 
+    if (!validateItem(item)) {
+      item.generating = false;
+      updateCardState(item);
+      updatePreview();
+      saveState();
+      return;
+    }
+
+    const text = item.text.trim();
     if (!text) {
       item.image = "";
       item.generating = false;
       item.error = "emptyText";
+      item.fieldError = item.type === "text" ? "text" : "";
       updateCardState(item);
       updatePreview();
       saveState();
@@ -183,15 +334,17 @@
     updatePreview();
 
     try {
-      if (!window.QRCode || typeof window.QRCode.toDataURL !== "function") {
+      if (!renderer || typeof renderer.render !== "function") {
         throw new Error("libraryMissing");
       }
 
-      const image = await window.QRCode.toDataURL(text, {
-        errorCorrectionLevel: "M",
-        margin: 2,
-        width: QR_IMAGE_SIZE,
-        color: { dark: "#111714", light: "#ffffff" },
+      const image = await renderer.render(text, {
+        size: QR_IMAGE_SIZE,
+        margin: 4,
+        foreground: state.style.foreground,
+        background: state.style.background,
+        shape: state.style.shape,
+        logo: state.style.logo,
       });
 
       if (item.generation !== generation || !state.items.includes(item)) return;
@@ -201,8 +354,12 @@
       if (item.generation !== generation) return;
       console.error("QR kód se nepodařilo vytvořit.", error);
       item.image = "";
-      const message = String(error.message || error).toLowerCase();
-      item.error = message.includes("big") ? "tooLong" : error.message === "libraryMissing" ? "libraryMissing" : "generic";
+      const message = String(error && error.message ? error.message : error).toLowerCase();
+      item.error = message.includes("big") || message.includes("too long") || message.includes("overflow")
+        ? "tooLong"
+        : message.includes("librarymissing")
+          ? "libraryMissing"
+          : "generic";
     } finally {
       if (item.generation === generation) {
         item.generating = false;
@@ -213,9 +370,132 @@
     }
   }
 
-  function scheduleQr(item) {
-    invalidateQr(item);
-    item.editTimer = window.setTimeout(() => generateQr(item), 260);
+  function refreshItem(item, immediate) {
+    window.clearTimeout(item.editTimer);
+    item.generation += 1;
+
+    if (!validateItem(item)) {
+      updateCardState(item);
+      updatePreview();
+      saveState();
+      return;
+    }
+
+    item.generating = true;
+    updateCardState(item);
+    updatePreview();
+    item.editTimer = window.setTimeout(() => generateQr(item), immediate ? 0 : 260);
+  }
+
+  /* ---------- Card rendering ---------- */
+
+  function createTypeSelect(card, item) {
+    const select = card.querySelector(".item-type");
+    content.getTypes().forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type.id;
+      option.textContent = t(type.labelKey);
+      select.appendChild(option);
+    });
+    select.value = item.type;
+    select.addEventListener("change", () => {
+      if (!content.isType(select.value) || select.value === item.type) return;
+      pushHistory();
+      changeItemType(item, select.value);
+    });
+  }
+
+  function changeItemType(item, type) {
+    const previousText = item.text;
+    item.type = type;
+    item.data = content.defaults(type);
+    if (type === "text") item.data.text = previousText;
+    if (type === "url" && /^https?:\/\//i.test(previousText.trim())) item.data.url = previousText.trim();
+    item.text = content.encode(type, item.data);
+    item.fieldError = "";
+    item.error = "";
+    item.image = "";
+    renderItems();
+    updatePreview();
+    saveState();
+    refreshItem(item, true);
+  }
+
+  function buildField(field, item) {
+    const label = document.createElement("label");
+    label.className = `item-form-field${field.full ? " full" : ""}`;
+
+    const caption = document.createElement("span");
+    caption.textContent = t(field.labelKey);
+    label.appendChild(caption);
+
+    let control;
+    if (field.control === "textarea") {
+      control = document.createElement("textarea");
+      control.rows = 2;
+      control.className = "item-input item-textarea";
+    } else if (field.control === "select") {
+      control = document.createElement("select");
+      control.className = "item-input";
+      (field.options || []).forEach((option) => {
+        const element = document.createElement("option");
+        element.value = option.value;
+        element.textContent = t(option.labelKey);
+        control.appendChild(element);
+      });
+    } else {
+      control = document.createElement("input");
+      control.type = field.control;
+      control.className = "item-input";
+    }
+
+    control.dataset.field = field.name;
+    if (field.placeholderKey) control.placeholder = t(field.placeholderKey);
+    control.value = item.data[field.name] == null ? "" : item.data[field.name];
+    label.appendChild(control);
+    bindField(control, field, item);
+    return label;
+  }
+
+  function buildCheckbox(field, item) {
+    const label = document.createElement("label");
+    label.className = `item-checkbox${field.full ? " full" : ""}`;
+
+    const control = document.createElement("input");
+    control.type = "checkbox";
+    control.dataset.field = field.name;
+    control.checked = Boolean(item.data[field.name]);
+
+    const caption = document.createElement("span");
+    caption.textContent = t(field.labelKey);
+
+    label.append(control, caption);
+    bindField(control, field, item);
+    return label;
+  }
+
+  function bindField(control, field, item) {
+    const update = () => {
+      noteEdit(field.control === "checkbox" || field.control === "select");
+      if (field.control === "checkbox") item.data[field.name] = control.checked;
+      else item.data[field.name] = control.value;
+      refreshItem(item);
+    };
+
+    if (field.control === "checkbox" || field.control === "select") {
+      control.addEventListener("change", update);
+    } else {
+      control.addEventListener("input", update);
+    }
+  }
+
+  function renderItemForm(card, item) {
+    const form = card.querySelector(".item-form");
+    const fragment = document.createDocumentFragment();
+    content.getFields(item.type).forEach((field) => {
+      fragment.appendChild(field.control === "checkbox" ? buildCheckbox(field, item) : buildField(field, item));
+    });
+    form.replaceChildren(fragment);
   }
 
   function createCard(item) {
@@ -224,23 +504,16 @@
     const card = fragment.querySelector(".qr-card");
     card.dataset.id = item.id;
 
-    const textInput = card.querySelector(".item-text");
+    createTypeSelect(card, item);
+    renderItemForm(card, item);
+
     const sizeInput = card.querySelector(".item-size");
     const labelInput = card.querySelector(".item-label");
-    textInput.value = item.text;
     sizeInput.value = item.size;
     labelInput.value = item.label;
 
-    textInput.addEventListener("input", () => {
-      item.text = textInput.value;
-      scheduleQr(item);
-      saveState();
-    });
-    textInput.addEventListener("blur", () => {
-      if (!item.generating && !item.image) generateQr(item);
-    });
-
     sizeInput.addEventListener("input", () => {
+      noteEdit();
       item.size = utils.toNumber(sizeInput.value, 0);
       updatePreview();
       saveState();
@@ -253,6 +526,7 @@
     });
 
     labelInput.addEventListener("input", () => {
+      noteEdit();
       item.label = labelInput.value;
       updatePreview();
       saveState();
@@ -265,6 +539,7 @@
         sizeInput.focus();
         return;
       }
+      pushHistory();
       state.items.forEach((entry) => { entry.size = size; });
       Array.from(elements.itemsList.children).forEach((entryCard) => {
         entryCard.querySelector(".item-size").value = size;
@@ -275,14 +550,18 @@
     });
 
     card.querySelector(".duplicate-button").addEventListener("click", () => {
+      pushHistory();
       const index = state.items.indexOf(item);
       const duplicate = {
         id: createId(),
+        type: item.type,
+        data: { ...item.data },
         text: item.text,
         size: item.size,
         label: item.label,
         image: item.image,
         error: item.error,
+        fieldError: item.fieldError,
         generating: false,
         generation: 0,
       };
@@ -295,6 +574,7 @@
     });
 
     card.querySelector(".delete-button").addEventListener("click", () => {
+      pushHistory();
       window.clearTimeout(item.editTimer);
       item.generation += 1;
       state.items = state.items.filter((entry) => entry.id !== item.id);
@@ -316,6 +596,8 @@
     elements.itemCount.textContent = state.items.length;
     updateNumbers();
   }
+
+  /* ---------- Preview and export ---------- */
 
   function updatePreview() {
     const previewItems = state.items.filter((item) => item.image && !item.error && Number(item.size) > 0);
@@ -343,7 +625,7 @@
 
       const image = document.createElement("img");
       image.src = placement.item.image;
-      image.alt = t("card.alt", placement.item.label || placement.item.text);
+      image.alt = t("card.alt", placement.item.label || (placement.item.text || "").split("\n")[0]);
       wrapper.appendChild(image);
 
       if (placement.label) {
@@ -380,35 +662,6 @@
     } else {
       elements.exportSummary.textContent = t("preview.summaryReady", state.items.length, pageCount);
     }
-  }
-
-  function addItems() {
-    const texts = utils.parseBulkInput(elements.bulkInput.value, state.splitCommas);
-    if (!texts.length) {
-      showToast(t("toast.emptyInput"), true);
-      elements.bulkInput.focus();
-      return;
-    }
-
-    const newItems = texts.map((text) => ({
-      id: createId(),
-      text,
-      size: state.defaultSize,
-      label: "",
-      image: "",
-      error: "",
-      generating: true,
-      generation: 0,
-    }));
-
-    state.items.push(...newItems);
-    state.bulkText = "";
-    elements.bulkInput.value = "";
-    renderItems();
-    updatePreview();
-    saveState();
-    showToast(t("toast.added", texts.length));
-    Promise.allSettled(newItems.map((item) => generateQr(item)));
   }
 
   function normalizeControl(input, min, max, fallback) {
@@ -504,6 +757,112 @@
     }
   }
 
+  /* ---------- Adding items ---------- */
+
+  function createItem(text, size) {
+    const data = content.defaults("text");
+    data.text = text;
+    return {
+      id: createId(),
+      type: "text",
+      data,
+      text: content.encode("text", data),
+      size,
+      label: "",
+      image: "",
+      error: "",
+      fieldError: "",
+      generating: true,
+      generation: 0,
+    };
+  }
+
+  function addItems() {
+    const texts = utils.parseBulkInput(elements.bulkInput.value, state.splitCommas);
+    if (!texts.length) {
+      showToast(t("toast.emptyInput"), true);
+      elements.bulkInput.focus();
+      return;
+    }
+
+    pushHistory();
+    const newItems = texts.map((text) => createItem(text, state.defaultSize));
+    state.items.push(...newItems);
+    state.bulkText = "";
+    elements.bulkInput.value = "";
+    renderItems();
+    updatePreview();
+    saveState();
+    showToast(t("toast.added", texts.length));
+    Promise.allSettled(newItems.map((item) => generateQr(item)));
+  }
+
+  /* ---------- QR style ---------- */
+
+  function syncStyleControls() {
+    elements.foreground.value = state.style.foreground;
+    elements.background.value = state.style.background;
+    elements.shape.value = state.style.shape;
+    if (state.style.logo) elements.logoPreview.src = state.style.logo;
+    else elements.logoPreview.removeAttribute("src");
+    elements.logoPreview.classList.toggle("hidden", !state.style.logo);
+    elements.logoRemove.classList.toggle("hidden", !state.style.logo);
+  }
+
+  function updateContrastWarning() {
+    const ratio = renderer.contrastRatio(state.style.foreground, state.style.background);
+    const inverted = renderer.relativeLuminance(state.style.foreground) >= renderer.relativeLuminance(state.style.background);
+    elements.contrastWarning.classList.toggle("hidden", ratio >= 4.5 && !inverted);
+  }
+
+  function regenerateStyledItems() {
+    state.items.forEach((item) => {
+      if (item.text || item.error) refreshItem(item, true);
+    });
+  }
+
+  function applyStyle(patch, options) {
+    state.style = { ...state.style, ...patch };
+    syncStyleControls();
+    updateContrastWarning();
+    saveState();
+
+    if (options && options.regenerate === false) return;
+    window.clearTimeout(styleTimer);
+    styleTimer = window.setTimeout(regenerateStyledItems, options && options.immediate ? 0 : 180);
+  }
+
+  function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function prepareLogo(file) {
+    const source = await readImageFile(file);
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("image failed"));
+      element.src = source;
+    });
+
+    const sourceWidth = image.naturalWidth || image.width || 256;
+    const sourceHeight = image.naturalHeight || image.height || 256;
+    const scale = Math.min(1, 512 / Math.max(sourceWidth, sourceHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png");
+  }
+
+  /* ---------- Events ---------- */
+
   elements.addButton.addEventListener("click", addItems);
   elements.bulkInput.addEventListener("input", () => {
     state.bulkText = elements.bulkInput.value;
@@ -525,6 +884,7 @@
   });
   elements.clearButton.addEventListener("click", () => {
     if (!state.items.length || !window.confirm(t("confirm.clear"))) return;
+    pushHistory();
     state.items.forEach((item) => {
       window.clearTimeout(item.editTimer);
       item.generation += 1;
@@ -575,9 +935,62 @@
   });
   elements.downloadButton.addEventListener("click", downloadPdf);
 
+  elements.undoButton.addEventListener("click", undo);
+  elements.redoButton.addEventListener("click", redo);
+
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const target = event.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+
+    const key = event.key.toLowerCase();
+    if (key === "z" && !event.shiftKey) {
+      event.preventDefault();
+      undo();
+    } else if (key === "y" || (key === "z" && event.shiftKey)) {
+      event.preventDefault();
+      redo();
+    }
+  });
+
+  elements.foreground.addEventListener("input", () => applyStyle({ foreground: elements.foreground.value }));
+  elements.background.addEventListener("input", () => applyStyle({ background: elements.background.value }));
+  elements.shape.addEventListener("change", () => applyStyle({ shape: elements.shape.value }, { immediate: true }));
+
+  elements.logoUpload.addEventListener("click", () => elements.logoInput.click());
+  elements.logoInput.addEventListener("change", async () => {
+    const file = elements.logoInput.files && elements.logoInput.files[0];
+    elements.logoInput.value = "";
+    if (!file) return;
+
+    if (!String(file.type || "").startsWith("image/") || file.size > 3 * 1024 * 1024) {
+      showToast(t("toast.logoError"), true);
+      return;
+    }
+
+    try {
+      const logo = await prepareLogo(file);
+      applyStyle({ logo }, { immediate: true });
+      showToast(t("toast.logoAdded"));
+    } catch (error) {
+      console.error("Logo se nepodařilo načíst.", error);
+      showToast(t("toast.logoError"), true);
+    }
+  });
+  elements.logoRemove.addEventListener("click", () => {
+    applyStyle({ logo: "" }, { immediate: true });
+    showToast(t("toast.logoRemoved"));
+  });
+  elements.styleReset.addEventListener("click", () => {
+    applyStyle({ ...DEFAULT_STYLE }, { immediate: true });
+  });
+
   i18n.onChange(() => {
     renderItems();
     updatePreview();
+    syncStyleControls();
+    updateContrastWarning();
+    updateHistoryButtons();
     elements.downloadButton.querySelector("span").textContent = t(exporting ? "preview.downloading" : "preview.download");
   });
 
@@ -604,6 +1017,9 @@
   elements.pageMargin.value = state.margin;
   elements.itemGap.value = state.gap;
   elements.showLabels.checked = state.showLabels;
+  syncStyleControls();
+  updateContrastWarning();
+  updateHistoryButtons();
   renderItems();
   updatePreview();
   Promise.allSettled(state.items.map((item) => generateQr(item)));
